@@ -190,88 +190,142 @@
 # bot.py
 # bot.py
 
-# bot.py
+"""
+An object-oriented redesign of the Telegram bot.
+
+This design encapsulates all bot functionality within a `TelegramBot` class,
+improving organization, maintainability, and scalability.
+"""
 
 import logging
 import re
+import textwrap
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Import configuration and handlers
+# --- External Handlers & Configuration ---
+# These are well-separated, so we keep them as they are.
 from config import TELEGRAM_TOKEN
 from document_handler import handle_word_file
 from downloader import handle_url
 
-# --- Set up logging ---
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# --- Constants & User-Facing Text ---
 
-# A simple regex to find any URL in a message
-URL_REGEX = r'(https?://[^\s]+)'
+class BotMessages:
+    """A container for all user-facing messages."""
+    WELCOME = textwrap.dedent("""
+        👋 Hello, <b>{user_first_name}</b>!
 
-# --- Command Handlers ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a welcome message."""
-    user = update.effective_user
-    # Updated welcome message, removing the specific mention of Facebook
-    welcome_message = (
-        f"👋 Hello, <b>{user.first_name}</b>!\n\n"
-        "I am your all-in-one media and document assistant.\n\n"
-        "🎬 <b>Universal Media Downloader</b>\n"
-        "Send me a link from many popular websites (like YouTube, TikTok, Instagram, etc.) and I'll download the media for you.\n\n"
-        "📄 <b>Word to PDF Converter</b>\n"
-        "Send a <code>.docx</code> file to convert it to a <code>.pdf</code>."
-    )
-    await update.message.reply_html(welcome_message)
+        I am your all-in-one media and document assistant.
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a help message."""
-    help_text = (
-        "<b>How I can help you:</b>\n\n"
-        "➡️ <b>To download any media:</b>\n"
-        "Just paste the link and send it to me.\n\n"
-        "➡️ <b>To convert Word to PDF:</b>\n"
-        "Attach and send a <code>.docx</code> file."
-    )
-    await update.message.reply_html(help_text)
+        🎬 <b>Universal Media Downloader</b>
+        Send me a link from many popular websites (like YouTube, TikTok, Instagram, etc.) and I'll download the media for you.
 
-async def unknown_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles text that isn't a command or a URL."""
-    await update.message.reply_text(
-        "I'm not sure what to do with that. Please send me a valid link or a .docx file."
-    )
+        📄 <b>Word to PDF Converter</b>
+        Send a <code>.docx</code> file to convert it to a <code>.pdf</code>.
+    """)
 
-# --- Main Function ---
-def main() -> None:
-    """Start the bot."""
-    if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "YOUR_TELEGRAM_TOKEN_HERE":
-        logger.error("FATAL: TELEGRAM_TOKEN is not set in config.py. Please add it.")
-        return
+    HELP = textwrap.dedent("""
+        <b>How I can help you:</b>
 
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+        ➡️ <b>To download any media:</b>
+        Just paste the link and send it to me.
+
+        ➡️ <b>To convert Word to PDF:</b>
+        Attach and send a <code>.docx</code> file.
+    """)
+
+    UNKNOWN = "I'm not sure what to do with that. Please send me a valid link or a .docx file."
+
+# --- Core Bot Class ---
+
+class TelegramBot:
+    """
+    The main class for the Telegram Bot.
+
+    This class encapsulates the application, handlers, and the main run loop.
+    """
+    # A simple regex to find any URL in a message
+    URL_REGEX = re.compile(r'(https?://[^\s]+)', re.IGNORECASE)
+
+    def __init__(self, token: str):
+        """Initializes the bot, sets up logging, and registers handlers."""
+        if not token or token == "YOUR_TELEGRAM_TOKEN_HERE":
+            raise ValueError("Telegram token is not configured. Please set it in config.py.")
+        
+        self.logger = self._setup_logging()
+        self.application = Application.builder().token(token).build()
+        self._register_handlers()
+        self.logger.info("Bot initialized successfully.")
+
+    def _setup_logging(self) -> logging.Logger:
+        """Configures the logging for the application."""
+        logging.basicConfig(
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            level=logging.INFO
+        )
+        return logging.getLogger(__name__)
+
+    def _register_handlers(self) -> None:
+        """Registers all command, message, and error handlers for the bot."""
+        # Command Handlers
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+
+        # Message Handlers
+        # Handler for .docx files (document conversion)
+        self.application.add_handler(MessageHandler(
+            filters.Document.FileExtension("docx"), 
+            handle_word_file
+        ))
+        
+        # Handler for any message containing a URL (media downloader)
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.Regex(self.URL_REGEX), 
+            handle_url
+        ))
+
+        # Handler for any other text that isn't a command or a URL
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND, 
+            self.unknown_text
+        ))
+        self.logger.info("All handlers have been registered.")
+
+    def run(self) -> None:
+        """Starts the bot's polling loop."""
+        self.logger.info("Bot is starting up...")
+        self.application.run_polling()
+        
+    # --- Handler Methods ---
     
-    # Add handlers for commands
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Sends a welcome message when the /start command is issued."""
+        user = update.effective_user
+        await update.message.reply_html(
+            BotMessages.WELCOME.format(user_first_name=user.first_name)
+        )
 
-    # Add handler for .docx files
-    application.add_handler(MessageHandler(filters.Document.FileExtension("docx"), handle_word_file))
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Sends a help message when the /help command is issued."""
+        await update.message.reply_html(BotMessages.HELP)
 
-    # One single handler for ALL URLs
-    # This will catch any message containing a link that isn't a command.
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.Regex(re.compile(URL_REGEX, re.IGNORECASE)), 
-        handle_url
-    ))
+    async def unknown_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handles text that doesn't match any other defined handler."""
+        await update.message.reply_text(BotMessages.UNKNOWN)
 
-    # Handler for any other text message that is not a command or a URL
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_text))
 
-    logger.info("Bot is starting up...")
-    application.run_polling()
+# --- Main Execution ---
+
+def main() -> None:
+    """The main entry point for the script."""
+    try:
+        bot = TelegramBot(token=TELEGRAM_TOKEN)
+        bot.run()
+    except ValueError as e:
+        logging.getLogger(__name__).fatal(f"FATAL: {e}")
+    except Exception as e:
+        logging.getLogger(__name__).fatal(f"An unexpected error occurred: {e}", exc_info=True)
 
 if __name__ == '__main__':
     main()
