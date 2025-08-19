@@ -1,0 +1,13 @@
+# Telegram Bot Framework
+python-telegram-bot
+
+# Video Downloader
+yt-dlp
+
+# Document Conversion
+docx2pdf
+pdf2docx
+pdf2image
+pytesseract
+python-dotenv
+python-docx

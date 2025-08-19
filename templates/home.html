@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Downloader</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 flex items-center justify-center min-h-screen">
+
+  <div class="w-full max-w-2xl mx-auto p-6 bg-white rounded-2xl shadow-lg">
+    <h1 class="text-3xl font-bold text-center mb-2">Video Downloader</h1>
+    <p class="text-gray-600 text-center mb-6">
+      Paste a video URL from a supported site to download it directly.
+    </p>
+
+    <!-- The Download Form -->
+    <form id="download-form" class="flex flex-col gap-4">
+      <input id="url-input" name="url" type="url" placeholder="https://www.tiktok.com/@user/video/123..." required
+             class="px-4 py-3 text-lg rounded-xl border-2 border-gray-300 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition"/>
+      
+      <button id="submit-button" type="submit" class="flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
+        <!-- Spinner (hidden by default) -->
+        <svg id="spinner" class="animate-spin -ml-1 mr-2 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span id="button-text">Download</span>
+      </button>
+    </form>
+    
+    <!-- Status Message Area -->
+    <div id="status-message" class="mt-4 text-center font-medium"></div>
+  </div>
+
+<script>
+  // Wait for the page to be fully loaded before running the script
+  document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('download-form');
+    const urlInput = document.getElementById('url-input');
+    const submitButton = document.getElementById('submit-button');
+    const buttonText = document.getElementById('button-text');
+    const spinner = document.getElementById('spinner');
+    const statusMessage = document.getElementById('status-message');
+
+    form.addEventListener('submit', async (event) => {
+      // 1. Prevent the default form submission which reloads the page
+      event.preventDefault();
+
+      // 2. Set the UI to a loading state
+      submitButton.disabled = true;
+      spinner.classList.remove('hidden');
+      buttonText.textContent = 'Processing...';
+      statusMessage.textContent = '';
+      statusMessage.className = 'mt-4 text-center font-medium'; // Reset classes
+
+      try {
+        // 3. Send the URL to the Flask backend using the Fetch API
+        const response = await fetch('/download', {
+          method: 'POST',
+          body: new FormData(form),
+        });
+
+        // 4. Handle errors from the backend
+        if (!response.ok) {
+          const errorMessage = await response.text();
+          throw new Error(errorMessage);
+        }
+
+        // 5. If successful, trigger the file download
+        
+        // Extract the filename from the 'Content-Disposition' header
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'video.mp4'; // A default filename
+        if (disposition && disposition.indexOf('attachment') !== -1) {
+          const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+          const matches = filenameRegex.exec(disposition);
+          if (matches != null && matches[1]) {
+            filename = matches[1].replace(/['"]/g, '');
+          }
+        }
+        
+        // Create a Blob from the video data
+        const blob = await response.blob();
+        
+        // Create a temporary URL for the blob
+        const downloadUrl = window.URL.createObjectURL(blob);
+        
+        // Create a hidden link element, set its properties, and click it
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = downloadUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        // Clean up the temporary URL and link
+        window.URL.revokeObjectURL(downloadUrl);
+        a.remove();
+        
+        // Update status message for success
+        statusMessage.textContent = 'Download started successfully!';
+        statusMessage.classList.add('text-green-600');
+
+      } catch (error) {
+        // Display any errors in the status message area
+        statusMessage.textContent = `Error: ${error.message}`;
+        statusMessage.classList.add('text-red-600');
+      } finally {
+        // 6. Always reset the UI back to the normal state
+        submitButton.disabled = false;
+        spinner.classList.add('hidden');
+        buttonText.textContent = 'Download';
+      }
+    });
+  });
+</script>
+
+</body>
+</html>
