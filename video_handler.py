@@ -27,7 +27,15 @@ def format_duration(seconds: int) -> str:
 def process_video_url(url: str, temp_dir: str) -> dict:
     """Synchronous video processing (yt-dlp is blocking)."""
     try:
-        ydl_opts_info = {'quiet': True, 'noplaylist': True}
+        # Check if cookies.txt exists locally
+        cookies_file = os.path.join(os.getcwd(), "cookies.txt")
+        ydl_opts_info = {
+            'quiet': True,
+            'noplaylist': True,
+        }
+        if os.path.exists(cookies_file):
+            ydl_opts_info['cookiefile'] = cookies_file
+
         with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
             info = ydl.extract_info(url, download=False)
 
@@ -35,6 +43,7 @@ def process_video_url(url: str, temp_dir: str) -> dict:
         uploader = info.get('uploader', 'N/A')
         duration = info.get('duration')
 
+        # --- find best format
         best_format = None
         for f in info.get('formats', []):
             filesize = f.get('filesize') or f.get('filesize_approx')
@@ -58,9 +67,12 @@ def process_video_url(url: str, temp_dir: str) -> dict:
                 'retries': 10,
                 'continuedl': True,
             }
+            if os.path.exists(cookies_file):
+                ydl_opts_download['cookiefile'] = cookies_file
 
             with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
                 ydl.download([url])
+
 
             if os.path.exists(filepath):
                 hashtags = re.findall(r'#\w+', title)
