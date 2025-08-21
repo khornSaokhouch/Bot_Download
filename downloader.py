@@ -7,35 +7,39 @@ import yt_dlp
 import subprocess
 from telegram import Update, constants
 from telegram.ext import ContextTypes
+import re
 
-# Import configuration
+
 from config import TELEGRAM_MAX_FILE_SIZE
 
 logger = logging.getLogger(__name__)
 
-# --- Ensure yt-dlp is always up-to-date ---
+# --- Ensure yt-dlp is up-to-date ---
 try:
     subprocess.run(["yt-dlp", "-U"], check=False)
     logger.info("yt-dlp self-update attempted.")
 except Exception as e:
     logger.warning(f"Could not self-update yt-dlp: {e}")
 
+# --- Helper Functions ---
 
 def _create_caption(info: dict) -> str:
-    """Creates a clean, simple caption from the media's info."""
-    title = info.get('title', 'Untitled')
+    """Creates a caption from video info."""
+    title = info.get('title', 'Untitled').replace('_', ' ').strip()
     uploader = info.get('uploader')
+    hashtags = re.findall(r'#\w+', title)
+    clean_title = re.sub(r'#\w+', '', title).strip()
 
-    # Clean up common junk from titles
-    title = title.replace('_', ' ').strip()
-
+    caption = f"<b>{clean_title}</b>"
     if uploader:
-        return f"<b>{title}</b>\n<i>by {uploader}</i>"
-    return f"<b>{title}</b>"
+        caption += f"\n<i>by {uploader}</i>"
+    if hashtags:
+        caption += "\n" + " ".join([f"<code>{tag}</code>" for tag in hashtags])
+    return caption
 
 
 async def _send_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, filepath: str, caption: str):
-    """Detects file type and sends it as a photo, video, or document."""
+    """Send media file to Telegram, checking type and size."""
     try:
         file_ext = os.path.splitext(filepath)[1].lower()
         file_size = os.path.getsize(filepath)
@@ -70,23 +74,22 @@ async def _send_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, filepath
         await context.bot.send_message(chat_id, text=f"❌ Could not send file: {os.path.basename(filepath)}")
 
 
-# --- Handler for ALL URLs ---
-async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles any message containing a URL and attempts to download the media."""
-    url = update.message.text.strip()
+# --- Main Handler ---
 
-    status_message = await update.message.reply_text("🔗 Link detected! Starting download process...")
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    url = update.message.text.strip()
+    status_message = await update.message.reply_text("🔗 Link detected! Starting download...")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        # yt-dlp options
         ydl_opts = {
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'quiet': True,
             'noprogress': True,
             'noplaylist': True,
+            'nocheckcertificate': True
         }
 
-        # If cookies.txt exists, use it (helps with TikTok)
+        # Use cookies.txt if available
         if os.path.exists("cookies.txt"):
             ydl_opts["cookiefile"] = "cookies.txt"
             logger.info("Using cookies.txt for yt-dlp.")
@@ -95,41 +98,42 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
 
-            # Handle playlists or multiple entries
+            # Handle playlists
             if 'entries' in info and info['entries']:
                 entries = info['entries']
-                await status_message.edit_text(f"✅ Found {len(entries)} items! Sending them now...")
+                await status_message.edit_text(f"✅ Found {len(entries)} items. Sending them now...")
 
                 for i, entry in enumerate(entries):
                     filepath = ydl.prepare_filename(entry)
                     if os.path.exists(filepath):
                         caption = _create_caption(entry)
-                        await _send_media(
-                            context, update.effective_chat.id,
-                            filepath, f"({i+1}/{len(entries)}) {caption}"
-                        )
+                        await _send_media(context, update.effective_chat.id,
+                                          filepath, f"({i+1}/{len(entries)}) {caption}")
                     else:
-                        logger.warning(f"File for entry {i+1} not found after download: {filepath}")
+                        logger.warning(f"File for entry {i+1} not found: {filepath}")
+
             else:
-                await status_message.edit_text("✅ Download complete! Sending file...")
                 filepath = ydl.prepare_filename(info)
                 if os.path.exists(filepath):
                     caption = _create_caption(info)
                     await _send_media(context, update.effective_chat.id, filepath, caption)
                 else:
-                    raise FileNotFoundError("Downloaded file could not be found.")
+                    raise FileNotFoundError("Downloaded file not found.")
 
             await status_message.delete()
 
         except Exception as e:
-            error_message = str(e).split('; ERROR: ')[-1]
+            error_message = str(e)
             logger.error(f"Error processing URL '{url}': {e}")
 
-            # Special hint for TikTok issues
+            # TikTok-specific hint
             if "TikTok" in error_message:
-                error_message += "\n\n💡 Try updating yt-dlp or adding cookies.txt."
+                hint = "💡 Try updating yt-dlp or adding cookies.txt."
+            else:
+                hint = ""
 
             await status_message.edit_text(
-                f"❌ Failed to download.\n\n<b>Reason:</b> <code>{error_message}</code>",
-                parse_mode=constants.ParseMode.HTML
+                f"❌ Failed to download.\n\n<b>Reason:</b> <code>{error_message}</code>\n{hint}",
+                parse_mode=constants.ParseMode.HTML,
+                disable_web_page_preview=True
             )
