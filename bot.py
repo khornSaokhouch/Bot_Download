@@ -116,10 +116,15 @@ class TelegramBot:
 
     # --- Command Handlers ---
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        user = update.effective_user
-        await update.message.reply_html(
-            BotMessages.WELCOME.format(user_first_name=user.first_name)
+        await update.message.reply_text(
+            "👋 Hello! I can download TikTok/YouTube videos and convert documents.\n\n"
+            "📌 Commands:\n"
+            "/download <URL> - Download video\n"
+            "/doc2pdf <file> - Convert DOCX to PDF\n"
+            "/pdf2doc <file> - Convert PDF to DOCX\n"
+            "/ocr <file> - Extract text from PDF images"
         )
+
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_html(BotMessages.HELP)
